@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+//WALLET INFO
+//Leave blank to use browser' local storage instead
+MY_ENCRYPTED_PP = "";
+MY_ADDRESS = "";
+    
+//Parameters
+NEW_ADDRESS_INDEX = 0; //when generating new wallet. 0 is 1st address from passphrse
+TX_FEE = 0.0003; //default transaction fee in BTC
+TO_RECEIVER = 0.00005420; //BTC dust sent along asset
+    
+</script>
+<link rel="stylesheet" href="styles.css">
+<script src="js/jquery-3.2.1.min.js"></script>
+<script src="js/bitcore.min.js"></script>
+<script src="js/seedrandom.min.js">//https://github.com/davidbau/seedrandom</script> 
+<script src="js/passphrase.js"></script>
+<script src="js/crypto-js-aes.js">//https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/aes.js</script>
+<script src="js/xcp-wallet/mnemonic.js">//https://github.com/loon3/XCP-Wallet</script>
+<script src="js/xcp-wallet/utxo.js"></script>
+<script src="js/xcp-wallet/transactions.js"></script>
+<script src="js/xcp-wallet/rc4.js"></script>
+<script src="js/xcp-wallet/convert-type.js"></script>
+<script src="js/xcp-wallet/decode.js"></script>
+<script src="js/xcp-wallet/biginteger.js"></script>
+<script>
+
+var encrypted_pp = "";
+var address = "";
+var btc_balance = "?";
+var xcp_balance = "?";
+var balances = [];
+var btc_usd = "?";
+var xcp_usd = "?";
+var xcp_btc = "?";
+var prices = [];
+
+//API functions rely on 3rd party services
+function getBalances() {
+    //asset balances and xcp from xchain 
+    $.getJSON( "https://xchain.io/api/balances/" + address, function( data ) {
+        xcp_balance = "0"; //error if address not used (assume any error means 0 XCP)
+        balances = [];
+        $.each( data.data, function( key, val ) {
+            var asset = val.asset;
+            var asset_long = val.asset_longname;
+            var quant = val.quantity;
+            if (asset == "XCP") {
+                xcp_balance = quant;        
+            } else if (asset_long == "") {
+                balances.push([asset, quant, asset]); //use latter index for sends (subassets have a numeric equivialent)
+            } else {
+                balances.push([asset_long, quant, asset]); 
+            }
+        });
+        displayBalances();
+    });
+
+    /*//btc balance from blockchain.info
+    $.getJSON( "https://blockchain.info/balance?active=" + address, function( data ) {
+        $.each( data, function( key, val ) {
+            btc_balance = val.final_balance / 100000000;
+        });
+        displayBalances();
+    });*/
+    
+    //btc balance from blockexplorer
+    $.getJSON( "https://blockexplorer.com/api/addr/" + address + "/balance", function( data ) {
+        btc_balance = data / 100000000;
+        displayBalances();
+    });
+    
+}
+    
+function getPrices() {
+    //coin prices from coinmarketcap
+    //asset name may be either id or symbol
+    $.getJSON( "https://api.coinmarketcap.com/v1/ticker/", function( data ) {
+        prices = [];
+        $.each( data, function( key, val ) {
+            var id = val.id.toUpperCase();
+            var symbol = val.symbol.toUpperCase();
+            var price_usd = Number(val.price_usd);
+            var price_btc = Number(val.price_btc);
+            if (symbol == "BTC") {
+                btc_usd = price_usd;        
+            } else if (symbol == "XCP") {
+                xcp_usd = price_usd;
+                xcp_btc = price_btc;
+            } else {
+                prices.push([id, price_usd, price_btc]);
+                prices.push([symbol, price_usd, price_btc]);
+            } 
+        });
+        displayBalances();
+        displayPriceInfo();
+    });
+}
+
+    
+    
+// *** Below functions display main wallet view
+function displayWallet() {
+    var output = "";
+    output += "<h1>Vanilla XCP</h1>";
+    output += "<h2>My Wallet</h2>";
+    output += "Address<br>"+address+"<br><br>";
+    output += "<div id=\"balances\">&nbsp;</div>";
+    output += "<div id=\"sendForm\">&nbsp;</div>";
+    output += "<div id=\"priceInfo\">&nbsp;</div>";
+    output += "<div id=\"walletDetails\">&nbsp;</div>";
+    document.getElementById('container').innerHTML = output;
+    getBalances();
+    getPrices();
+    displaySendForm();
+    displayPriceInfo();
+    displayWalletInfo();
+}    
+    
+function displayBalances() {
+    var btc_val = btc_balance * btc_usd;
+    btc_val = "$"+walletFormatUSD(btc_val);
+    var xcp_val = xcp_balance * xcp_usd;
+    xcp_val = "$"+walletFormatUSD(xcp_val);
+    var output = "";
+    output += "<table style=\"width:400px;\">";
+    output += "<tr><td class=\"tbltok\">BTC</td><td class=\"tblbal\">"+bal_displ(btc_balance)+"</td><td class=\"tblusd\">"+btc_val+"</td></tr>";
+    output += "<tr><td class=\"tbltok\">XCP</td><td class=\"tblbal\">"+bal_displ(xcp_balance)+"</td><td class=\"tblusd\">"+xcp_val+"</td></tr>";
+    for(var i = 0; i < balances.length; i++) {
+        var asset_val = "";
+        for(var j = 0; j < prices.length; j++) {
+            if(balances[i][0] == prices[j][0]) {
+               asset_val = balances[i][1] * prices[j][1];    
+               asset_val = "$"+walletFormatUSD(asset_val);    
+            }
+        }
+        //output += balances[i][0] + " " + balances[i][1] + "<br>";
+        output += "<tr><td class=\"tbltok\">"+name_displ(balances[i][0])+"</td><td class=\"tblbal\">"+bal_displ(balances[i][1])+"</td><td class=\"tblusd\">"+asset_val+"</td></tr>";
+    }
+    output += "</table>";
+    document.getElementById('balances').innerHTML = output;
+    displayTxCost();
+}
+
+function name_displ(asset) {
+    if (asset.length > 22) {
+        return asset.substring(0,20)+"..";
+    }
+    return asset;
+}
+function bal_displ(number) {
+//Outputs a string with number formatted for wallet balance display
+//Always 8 digits after comma
+//Fractional part shall be smaller and grey (HTML5 format)
+//Thousands separator if >=10,000.00000000
+	if (isNaN(number)) return "?";
+	var formatted = parseFloat(number);
+	formatted = formatted.toFixed(8);
+	var split = formatted.toString().split('.');
+	split[1] = "<span style=\"color:dimgray;font-size:100%;\">" + split[1].substring(0,3) + "</span><span style=\"color:dimgray;font-size:90%;\">" + split[1].substring(3,6) + "</span><span style=\"color:dimgray;font-size:75%;\">" + split[1].substring(6) + "</span>";
+	if (split[0].length >= 5) {
+        split[0] = split[0].replace(/(\d)(?=(\d{3})+$)/g, '$1,');
+    }
+	formatted = split[0] + "." + split[1];
+	return formatted;
+}
+
+function digitGroup(x) {
+    var parts = x.toString().split(".");
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return parts.join(".");
+}
+    
+function walletFormatUSD(number) {
+//Outputs a string with number formatted for wallet balance display
+//Always 2 digits after comma
+//Thousands separator if >=10,000.00000000
+	if (isNaN(number)) return "?";
+	var formatted = parseFloat(number);
+	formatted = formatted.toFixed(2);
+	var split = formatted.toString().split('.');
+	if (split[0].length >= 5) {
+        split[0] = split[0].replace(/(\d)(?=(\d{3})+$)/g, '$1,');
+    }
+	formatted = split[0] + "." + split[1];
+	return formatted;
+}   
+
+    
+    
+// *** Below functions for sending BTC, XCP or Asset
+function displaySendForm() {
+    var output = "";
+    output += "<hr><h2>Send</h2>";    
+    
+    output += "<b>Asset</b><br>";
+    output += "Send this asset<br>";
+    output += "<input type=\"text\" id=\"sendAsset\" value=\"\" onchange=\"valSendInp();\"><br><br>";
+
+    output += "<b>Amount</b><br>";
+    output += "<i>Quantity to send</i><br>";
+    output += "<input type=\"text\" id=\"sendAmount\" value=\"\" onchange=\"valSendInp();\"><br><br>";
+
+    output += "<b>Recipient Address</b><br>";
+    output += "Send the asset to this address<br>";
+    output += "<input type=\"text\" id=\"sendTo\" placeholder=\"BITCOIN ADDRESS\" style=\"width:400px;\"  onchange=\"valSendInp();\"><br><br>";
+
+    output += "<b>BTC Fee</b><br>";
+    output += "Bitcoin fee to miners<br>";
+    output += "<input type=\"number\" id=\"sendFee\" value=\""+TX_FEE.toFixed(8)+"\" style=\"width:150px;\" onchange=\"displayTxCost();valSendInp();\" step=\"0.00001\"><br>";
+    output += "<i><span id=\"txCost\">&nbsp;</span></i><br><br>";
+    
+    output += "<b>Password</b><br>";
+    output += "Enter password to send<br>";
+    output += "<input type=\"text\" id=\"sendPassword\" value=\"\" oninput=\"valSendInp();\"><br><br>";
+    
+    output += "<button id=\"sendButton\" type=\"button\" class=\"button\" onclick=\"sendTx();\">SEND ASSET</button><br>";
+    output += "<div id=\"sendfeedback\">&nbsp;</div><br><br>";
+
+    document.getElementById('sendForm').innerHTML = output;
+}
+    
+function displayTxCost() {
+    var send_asset = document.getElementById('sendAsset').value;
+    var fee = document.getElementById("sendFee").value;
+    var cost_btc = Number(fee);
+    if (send_asset != "BTC") cost_btc += TO_RECEIVER;
+    var cost_usd = cost_btc * btc_usd;
+    var output = "";
+    output += "Total Cost: " + cost_btc.toFixed(8) + " BTC ($" + cost_usd.toFixed(2) + ")";
+    document.getElementById('txCost').innerHTML = output;
+}
+    
+function valSendInp() {
+    displayTxCost();
+    var color_ok = "#3e8e41";
+    var color_wrong = "maroon";
+    var send_asset = document.getElementById('sendAsset').value;
+    var send_amount = document.getElementById('sendAmount').value;
+    var send_to = document.getElementById('sendTo').value;
+    var send_fee = document.getElementById('sendFee').value;
+    var send_password = document.getElementById('sendPassword').value;
+    var assetOK = false;
+    var amountOK = false;
+    var toOK = false;
+    var feeOK = false;
+    var passwordOK = false;
+    var assetInd = -1;
+    if (send_asset == "XCP") {
+        assetOK = true;
+    } else if (send_asset == "BTC") {
+        assetOK = true;
+    } else {
+        for(var i = 0; i < balances.length; i++) {
+            if (balances[i][0] == send_asset) {
+                assetOK = true;
+                assetInd = i;
+            }   
+        }
+    }
+    send_amount = Number(send_amount);
+    if (isNaN(send_amount)) {
+        
+    } else if (send_amount <= 0) {
+        
+    } else if (send_asset == "XCP" && send_amount <= xcp_balance) {
+        amountOK = true;
+    } else if (send_asset == "BTC" && send_amount <= btc_balance) {
+        amountOK = true;
+    } else if (send_amount <= Number(balances[assetInd][1])) {
+        amountOK = true;
+    }
+    //address test not complete. simple test to check length is 26-34 chars
+    //and starts with 1 (counterparty does not work with multisig '3' addresses)
+    if (send_to.length >= 26 && send_to.length <= 34 && send_to[0] == "1") {
+        toOK = true;
+    }
+    send_fee = Number(send_fee);
+    if (isNaN(send_fee)) {
+        
+    } else if (send_fee >= 0 && send_fee < 0.01) {
+      feeOK = true; //hardcoded max 0.00999999 .. in extreme cases more may be desired
+    }
+    if (send_password != "") {
+        var decrypted = CryptoJS.AES.decrypt(encrypted_pp, send_password);
+        if (decrypted != "") {
+            passwordOK = true;
+        }
+    }
+    
+    if (assetOK && amountOK && toOK && feeOK && passwordOK) {
+        document.getElementById('sendButton').disabled = false;
+    } else {
+        document.getElementById('sendButton').disabled = true;        
+    }
+
+    if (assetOK == true) document.getElementById('sendAsset').style.color = color_ok;
+    else document.getElementById('sendAsset').style.color = color_wrong;
+    if (amountOK == true) document.getElementById('sendAmount').style.color = color_ok;
+    else document.getElementById('sendAmount').style.color = color_wrong;
+    if (toOK == true) document.getElementById('sendTo').style.color = color_ok;
+    else document.getElementById('sendTo').style.color = color_wrong;
+    if (feeOK == true) document.getElementById('sendFee').style.color = color_ok;
+    else document.getElementById('sendFee').style.color = color_wrong;
+}
+    
+function sendTx() {
+    var send_asset = document.getElementById('sendAsset').value;
+    var send_amount = document.getElementById('sendAmount').value;
+    var send_to = document.getElementById('sendTo').value;
+    var send_fee = document.getElementById('sendFee').value;
+    var send_password = document.getElementById('sendPassword').value;
+    var pp = CryptoJS.AES.decrypt(encrypted_pp, send_password);
+    pp = pp.toString(CryptoJS.enc.Utf8);
+    for(var i = 0; i < balances.length; i++) {
+        if (balances[i][0] == send_asset) {
+            send_asset = balances[i][2];
+        }
+    }
+    document.getElementById('sendButton').disabled = true;
+    initializeTxPp(address, send_to, send_asset, send_amount, TO_RECEIVER, send_fee, pp, "sendfeedback")
+}
+
+  
+    
+// *** Below function display price info for BTC, XCP and any asset with a market price 
+function displayPriceInfo() {
+    var output = "";
+    output += "<hr><h1>Market Prices</h1>";
+    output += "<table style=\"width:200px;\">";
+    output += "<tr><td class=\"tbltok\"  colspan=\"2\"><b>Rates USD</b></td></tr>";
+    output += "<tr><td class=\"tbltok\">BTC</td><td class=\"tblusd\">$"+walletFormatUSD(btc_usd)+"</td></tr>";
+    output += "<tr><td class=\"tbltok\">XCP</td><td class=\"tblusd\">$"+walletFormatUSD(xcp_usd)+"</td></tr>";
+    for(var i = 0; i < balances.length; i++) {
+        var asset_price = 0;
+        for(var j = 0; j < prices.length; j++) {
+            if(balances[i][0] == prices[j][0]) {
+                asset_price = walletFormatUSD(prices[j][1]);
+                output += "<tr><td class=\"tbltok\">"+name_displ(balances[i][0])+"</td><td class=\"tblusd\">$"+asset_price+"</td></tr>";
+            }
+        }
+    }
+    output += "</table><br>";
+    output += "<table style=\"width:200px;\">";
+    output += "<tr><td class=\"tbltok\"  colspan=\"2\"><b>Rates Satoshi</b></td></tr>";
+    output += "<tr><td class=\"tbltok\">BTC</td><td class=\"tblusd\">100,000,000</td></tr>";
+    output += "<tr><td class=\"tbltok\">XCP</td><td class=\"tblusd\">"+digitGroup(Math.round(xcp_btc*100000000))+"</td></tr>";
+    for(var i = 0; i < balances.length; i++) {
+        var asset_price = 0;
+        for(var j = 0; j < prices.length; j++) {
+            if(balances[i][0] == prices[j][0]) {
+                asset_price = prices[j][2]*100000000;
+                asset_price = Math.round(asset_price);
+                asset_price = digitGroup(asset_price);
+                output += "<tr><td class=\"tbltok\">"+name_displ(balances[i][0])+"</td><td class=\"tblusd\">"+asset_price+"</td></tr>";
+            }
+        }
+    }
+    output += "</table>";
+    document.getElementById('priceInfo').innerHTML = output;
+    
+}
+
+    
+    
+// *** Below functions show passphrase, address, key, etc
+function displayWalletInfo() {
+    var output = "";
+    output += "<hr><h1>Wallet Info</h1>";
+    output += "Enter password to display info<br>";
+    output += "<input type=\"text\" id=\"walletPassword\" value=\"\" oninput=\"genWalletDetails();\"><br><br>";
+    output += "<div id=\"infoDecrypted\"><i>Details appear here once the correct password is entered.</i></div><br><br>";
+    document.getElementById('walletDetails').innerHTML = output;
+}
+function genWalletDetails() {
+    var pw = document.getElementById('walletPassword').value;
+    var decrypted = "";
+    var decrypted = CryptoJS.AES.decrypt(encrypted_pp, pw);
+    decrypted = decrypted.toString(CryptoJS.enc.Utf8);
+    if (decrypted.length <= 2) return;
+    var addr_list = genAddr(decrypted, NEW_ADDRESS_INDEX+5, true);
+    var current_addr = addr_list[NEW_ADDRESS_INDEX][0];
+    var current_privkey = addr_list[NEW_ADDRESS_INDEX][1];
+    var output = "";
+    output += "<b>Passphrase</b><br>";
+    output += decrypted+"<br><br>";
+    output += "<b>Address</b><br>";
+    output += current_addr+"<br><br>";
+    output += "<b>Private Key</b><br>";
+    output += current_privkey+"<br><br>";
+    output += "From the same passphrase you have<br>";
+    output += "access to a list of addresses:<br>";
+    output += "<br><code style=\"display:block;white-space:pre-wrap;\">";
+    for(var i = 0; i < addr_list.length; i++) {
+        output += "#"+i+" ";
+        output += addr_list[i][0]+"\n";
+        output += addr_list[i][1]+"\n";
+        if (i < addr_list.length - 1) output += "\n";
+    }
+    output += "</code><br>";
+    output += "To use another address from the list,<br>";
+    output += "change <code>MY_ADDRESS</code> and <code>NEW_ADDRESS_INDEX</code> in <code>index.html</code> accordingly.<br><br>";
+    
+    output += "Want to make a new wallet with a new passphrase?<br>";
+    output += "You can, but be aware of the following<br>";
+    output += "<input type=\"checkbox\" id=\"checkNewWallet1\" onChange=\"instructClearMemory();\">The existing wallet will be deleted<br>";
+    output += "<input type=\"checkbox\" id=\"checkNewWallet2\" onChange=\"instructClearMemory();\">The existing wallet can only be recovered from the 12 word passphrase<br>";
+    output += "<input type=\"checkbox\" id=\"checkNewWallet3\" onChange=\"instructClearMemory();\">I have the 12 word passphrase written down on a piece of paper<br>";
+    output += "<input type=\"checkbox\" id=\"checkNewWallet4\" onChange=\"instructClearMemory();\">I have double checked that the passphrase is correct<br>";
+    output += "<span id=\"clearMemoryInst\"></span>";
+    document.getElementById('infoDecrypted').innerHTML = output;
+}
+function instructClearMemory() {
+    if (document.getElementById("checkNewWallet1").checked && document.getElementById("checkNewWallet2").checked && document.getElementById("checkNewWallet3").checked && document.getElementById("checkNewWallet4").checked) {
+        var output = "";
+        output += "<br>Do the following to delete this wallet and make a new wallet:";
+        output += "<ul>";
+        if (MY_ENCRYPTED_PP != "") {
+            output += "<li>Set <code>MY_ENCRYPTED_PP</code> and <code>MY_ADDRESS</code> in <code>index.html</code> to empty strings</li>";
+        }
+        output += "<li onClick=\"localStorage.clear();displaySettings();\">CLICK ON THIS TEXT TO CLEAR MEMORY AND RESET WALLET</li>";
+        document.getElementById('clearMemoryInst').innerHTML = output;
+    }
+}    
+    
+    
+    
+// *** Below functions for generating new wallet
+function displaySettings() {
+    var output = "";
+    output += "<h1>Create New Wallet</h1>";
+    output += "<b>Passphrase</b><br>";
+    output += "<i>Leave default 12 words to create new wallet,<br>or enter an existing passphrase to import wallet</i><br>";
+    output += "<input type=\"text\" value=\"" + newPassphrase() + "\" id=\"newPassphrase\" style=\"width:100%;\" onblur=\"previewAddr();\"><br><br>";
+    output += "<b>Your Address</b><br>";
+    output += "<span id=\"addrPreview\">&nbsp;</span><br><br>";
+    output += "<b>Password</b><br>";
+    output += "<i>Must be entered every time you send<br>8-10 random characters recommended</i><br>";
+    output += "<input type=\"text\" value=\"" + newPassword() + "\" id=\"newPassword\"><br><br>";
+    output += "<button type=\"button\" id=\"newWallet\" onClick=\"genNewWallet();\">MAKE NEW WALLET</button>";
+    output += "<div id=\"walletInfo\"></div>";
+    
+    document.getElementById('container').innerHTML = output;
+    previewAddr();
+}
+    
+function previewAddr() {
+    var pp = document.getElementById("newPassphrase").value;
+    var ppClean = cleanPPformat(pp);
+    if (ppClean != pp) document.getElementById('newPassphrase').value = ppClean;
+    var address = "-";
+    if (isValidPP(ppClean)) {
+        var addr_list = genAddr(ppClean, NEW_ADDRESS_INDEX+1);
+        address = addr_list[NEW_ADDRESS_INDEX][0];
+    }
+    document.getElementById('addrPreview').innerHTML = address;
+}
+
+function genNewWallet() {
+    var pp = document.getElementById("newPassphrase").value;
+    var pw = document.getElementById("newPassword").value;
+    var encrypted = CryptoJS.AES.encrypt(pp, pw);
+    var addr_list = genAddr(pp, NEW_ADDRESS_INDEX+1);
+    var addr = addr_list[NEW_ADDRESS_INDEX][0];
+    localStorage.setItem("encrypted_pp", encrypted);
+    localStorage.setItem("address", addr);
+    //localStorage.setItem("encrypted_pp_old", encrypted_pp);
+    //localStorage.setItem("address_old", address);
+    var output = "<br><br>";
+    output += "SUCCESS!<br><br>";
+    output += "Wallet is ready to use.<br><br>";
+    output += "It is permanently stored in the browser's memory,<br>";
+    output += "but you must <span style=\"color:red;font-weight:bold;\">write down the 12 word passphrase</span> to recover the wallet.<br><br>";
+    output += "Write down the passphrase now:<br>";
+    output += "<b><mark>"+pp+"</mark></b><br><br>";
+    output += "<i>OPTIONAL: To use the wallet across browsers, save below variables in index.html</i><br>";
+    output += "<pre>MY_ENCRYPTED_PP = \""+encrypted+"\";</pre>";
+    output += "<pre>MY_ADDRESS = \""+addr+"\";</pre><br>";
+    output += "<button type=\"button\" id=\"openWallet\" onClick=\"location.reload();\">OPEN WALLET</button>";
+    
+    document.getElementById('walletInfo').innerHTML = output;    
+}
+
+    
+    
+// *** First check whether wallet exists or generate a new one     
+function prepareWallet() {
+    if (MY_ENCRYPTED_PP != "") {
+        encrypted_pp = MY_ENCRYPTED_PP;
+        address = MY_ADDRESS;
+        displayWallet();
+    } else if (typeof(Storage) !== "undefined") {
+        if (localStorage.encrypted_pp) {
+            //Display existing wallet
+            encrypted_pp = localStorage.getItem("encrypted_pp");
+            address = localStorage.getItem("address");
+            displayWallet();
+        } else {
+            //Prepare new wallet
+            displaySettings();
+            //document.getElementById("container").innerHTML = "Generate new wallet " + newPassphrase();
+            //localStorage.encrypted = 1;
+        }
+    } else {
+        document.getElementById("container").innerHTML = "Sorry, your browser does not support web storage. Cannot use wallet.";
+    }
+}
+</script>
+</head>
+<body onload="prepareWallet()">
+    <div id="container">
+
+<p>Error. Cannot load wallet.<br>Bug in JavaScript code?</p>
+
+
+    
+
+    
+    </div>
+</body>
+</html>

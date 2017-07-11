@@ -1,0 +1,62 @@
+body {
+    background-color: #f3e5ab;
+    font-family: 'Helvetica', Arial, Lucida Grande, sans-serif;
+    font-size: 15px; 
+}
+h1 {
+    
+}
+#container {
+    margin: auto;
+    width: 630px;
+    background-color: #f4eac1;
+    border: 10px solid #4CAF50;
+    padding: 0px 23px 23px 23px;
+    margin-top:15px;
+}
+button {
+    background-color: #4CAF50; /* Green */
+    border: none;
+    color: white;
+    padding: 12px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+}
+button:disabled, button[disabled]{
+    background-color: lightgray;
+}
+input {
+    width: 220px;
+    padding: 12px 12px;
+    margin: 8px 0;
+    font-size: 15px; 
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+input[type='checkbox'] { 
+    width: 20px;    
+}
+table {
+    border-collapse: collapse;
+}
+.tbltok {
+    text-align:left;
+}
+.tblbal {
+    text-align:right;
+}
+.tblusd {
+    text-align:right;
+    color:dimgray;
+    font-size:90%;
+}
+tr:nth-child(odd) {
+    background: #f3e5ab;
+}
+code {
+    background: #f3e5ab;
+}
