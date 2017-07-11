@@ -4,7 +4,7 @@ Vanilla XCP is a minimalistic Bitcoin and Counterparty wallet.
 
 It's written in JavaScript and HTML5. It can run in any browser, on any operating system, and on phones, tablets, as well as on desktops.
 
-It's intended as a starting point for developers to build new, custom wallets.
+It's intended as a starting point for developers to build new, custom wallets. It can also be used as is.
 
 The wallet can be run locally (download zip, extract, open `index.html` in browser) or served from a website. In either case the keys never leave the browser and are decrypted only when signing transactions.
 
