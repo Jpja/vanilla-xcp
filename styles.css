@@ -6,6 +6,9 @@ body {
 h1 {
     
 }
+hr {
+    margin-top: 25px;
+}
 #container {
     margin: auto;
     width: 630px;
@@ -19,6 +22,7 @@ button {
     border: none;
     color: white;
     padding: 12px 20px;
+    margin-bottom: 10px;
     text-align: center;
     text-decoration: none;
     display: inline-block;

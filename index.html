@@ -215,10 +215,10 @@ function displaySendForm() {
     
     output += "<b>Password</b><br>";
     output += "Enter password to send<br>";
-    output += "<input type=\"text\" id=\"sendPassword\" value=\"\" oninput=\"valSendInp();\"><br><br>";
+    output += "<input type=\"password\" id=\"sendPassword\" value=\"\" oninput=\"valSendInp();\"><br><br>";
     
     output += "<button id=\"sendButton\" type=\"button\" class=\"button\" onclick=\"sendTx();\">SEND ASSET</button><br>";
-    output += "<div id=\"sendfeedback\">&nbsp;</div><br><br>";
+    output += "<div id=\"sendfeedback\"></div>";
 
     document.getElementById('sendForm').innerHTML = output;
 }
