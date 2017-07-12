@@ -16,6 +16,8 @@ Asset balances are shown along with the USD equivalent if the asset is listed on
 
 The send form has basic sanity checks built in. Subassets are supported.
 
+Test out the wallet here : http://jpja.net/xcp/vanilla-xcp/
+
 ## Donate
 
 To support continued development, please consider a small tip to `1AeEhRpChp1TteqBTkC4GPmyQJgH31MMmK`.
